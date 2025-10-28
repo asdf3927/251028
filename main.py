@@ -1,196 +1,221 @@
+# app.py
 import streamlit as st
 import pandas as pd
 import numpy as np
 import altair as alt
+from io import StringIO
 
-# ------------------------ 기본 설정 ------------------------
-st.set_page_config(page_title="👻 바이브코딩 웹사이트 제작 😈", page_icon="🎃", layout="wide")
+st.set_page_config(page_title="OECD 경제 지표 대시보드", page_icon="📊", layout="wide")
 
-# 약간의 스타일 (Streamlit 기본 테마 안에서만 커스터마이징)
+# -------------------- 헤더 --------------------
+st.title("📊 OECD 경제 지표 대시보드")
 st.markdown("""
-<style>
-/* 제목 폰트 크기와 간격 조정 */
-h1 { margin-bottom: 0.3rem !important; }
-.section-title { font-size: 1.2rem; font-weight: 700; margin-top: 0.6rem; }
-.small-muted { color: #6b7280; font-size: 0.9rem; }
-.card {
-  padding: 1rem 1.2rem; border-radius: 16px; border: 1px solid rgba(0,0,0,.08);
-  background: linear-gradient(180deg, rgba(255,255,255,.7), rgba(255,255,255,.5));
-}
-.badge { font-size: .8rem; padding: .2rem .5rem; border-radius: 999px; background: #f1f5f9; }
-</style>
-""", unsafe_allow_html=True)
+**OECD 공식 CSV**(stats.oecd.org 또는 data.oecd.org의 Export → CSV) **URL을 붙여넣거나 파일을 업로드**하면  
+컬럼 매핑만으로 바로 시각화할 수 있어요. (추가 설치 불필요: streamlit, pandas, numpy, altair)
+""")
 
-# ------------------------ 상단 인사 영역 ------------------------
-st.title('👻 바이브코딩 웹사이트 제작 😈')
+# -------------------- 사이드바: 데이터 입력 --------------------
+with st.sidebar:
+    st.header("1) 데이터 불러오기")
+    mode = st.radio("가져오기 방식", ["CSV URL 붙여넣기", "CSV 파일 업로드"], horizontal=False)
 
-colA, colB, colC = st.columns([1,1,1])
-with colA:
-    name = st.text_input('이름을 입력해주세요 : ')
-with colB:
-    menu = st.selectbox('좋아하는 음식을 선택해주세요:', ['한식🍚','양식🍕','일식🍣','중식🥮','분식🍥'])
-with colC:
-    if st.button('인사말'):
-        if name:
-            st.success(f"{name}! 너는 {menu}을 제일 좋아하는구나? 나두 ~ ~ ")
-        else:
-            st.info("이름을 먼저 입력해줘!")
-
-st.divider()
-
-# ------------------------ 데이터 소스 선택 ------------------------
-st.markdown("### 🍽 특정 국가/유형 분석 · **특정 유형이 높은 국가 TOP 10**")
-st.markdown('<p class="small-muted">데이터를 업로드하거나, 샘플 데이터를 사용해 시각화할 수 있어요.</p>', unsafe_allow_html=True)
-
-src_col1, src_col2 = st.columns([1,2])
-with src_col1:
-    src_mode = st.radio("데이터 소스", ["샘플 데이터 사용", "CSV 업로드"], horizontal=True)
-
-def build_sample_data(seed: int = 42) -> pd.DataFrame:
-    np.random.seed(seed)
-    # 예시 국가 & 유형
-    countries = [
-        "Korea, Rep.", "Japan", "United States", "Canada", "Germany", "France", "United Kingdom",
-        "Italy", "Spain", "Australia", "Netherlands", "Sweden", "Norway", "Finland", "Denmark",
-        "China", "India", "Brazil", "Mexico", "South Africa"
-    ]
-    types = ["만족도", "참여율", "보급률", "성장률", "지표X"]
-    rows = []
-    for t in types:
-        # 국가별로 0~100 사이 난수 + 약간의 편향으로 '유형이 높은 국가'가 생기도록
-        base = np.random.uniform(40, 70, size=len(countries))
-        bias_idx = np.random.choice(len(countries), size=5, replace=False)
-        base[bias_idx] += np.random.uniform(10, 25, size=5)
-        for c, v in zip(countries, base + np.random.normal(0, 5, size=len(countries))):
-            rows.append({"country": c, "type": t, "value": max(0, min(100, round(float(v), 2)))})
-    return pd.DataFrame(rows)
-
-if src_mode == "CSV 업로드":
-    with src_col2:
-        up = st.file_uploader("CSV 파일을 올려주세요 (필수 컬럼: country, type, value)", type=["csv"])
-    if up is not None:
-        try:
-            df = pd.read_csv(up)
-        except Exception as e:
-            st.error(f"CSV를 읽는 중 오류가 발생했습니다: {e}")
-            st.stop()
+    df = None
+    if mode == "CSV URL 붙여넣기":
+        csv_url = st.text_input("OECD CSV 다운로드 URL", placeholder="https://stats.oecd.org/.../export.csv")
+        st.caption("※ stats.oecd.org에서 원하는 지표 → 우측 상단 Export → CSV 로 받은 URL을 붙여넣으세요.")
+        if st.button("URL 불러오기"):
+            try:
+                # pandas가 내부적으로 urllib로 직접 읽어옴 (추가 라이브러리 X)
+                df = pd.read_csv(csv_url)
+                st.success("CSV 로드 완료!")
+            except Exception as e:
+                st.error(f"CSV 로드 실패: {e}")
     else:
-        st.warning("CSV를 업로드하면 분석을 시작할 수 있어요.")
-        df = build_sample_data()
-else:
-    df = build_sample_data()
+        up = st.file_uploader("CSV 업로드", type=["csv"])
+        if up is not None:
+            try:
+                df = pd.read_csv(up)
+                st.success("CSV 로드 완료!")
+            except Exception as e:
+                st.error(f"CSV 로드 실패: {e}")
 
-# ------------------------ 데이터 유효성 검사 ------------------------
-required_cols = {"country", "type", "value"}
-if not required_cols.issubset(set(df.columns)):
-    st.error(f"데이터에 필수 컬럼이 없습니다. 필요한 컬럼: {required_cols}")
+# 데이터가 없으면 안내 후 종료
+if df is None:
+    st.info("좌측에서 **OECD CSV URL**을 붙여넣거나 **CSV 파일**을 업로드해 주세요.")
     st.stop()
 
-# 타입/범위 정리
-df = df.copy()
-df["type"] = df["type"].astype(str)
-df["country"] = df["country"].astype(str)
-# value를 수치로 강제 변환
-df["value"] = pd.to_numeric(df["value"], errors="coerce")
-df = df.dropna(subset=["value"])
+# -------------------- 원본 미리보기 --------------------
+with st.expander("📄 원본 데이터 미리보기 (상위 20행)"):
+    st.dataframe(df.head(20))
 
-# ------------------------ 사이드바: 컨트롤 ------------------------
-with st.sidebar:
-    st.markdown("### ⚙️ 분석 옵션")
-    selected_type = st.selectbox("분석할 유형(type)을 선택하세요", sorted(df["type"].unique()))
-    top_k = st.slider("TOP K", min_value=5, max_value=20, value=10, step=1)
+st.divider()
+st.subheader("2) 컬럼 매핑")
+
+cols = list(df.columns)
+
+# OECD CSV는 포맷이 제각각: LOCATION/TIME/Value or Country/Year/Value 등
+# → 사용자에게 어떤 컬럼이 무엇인지 매핑 받기
+col_country = st.selectbox("국가 컬럼", options=cols, index=0)
+col_time = st.selectbox("연도(또는 시점) 컬럼", options=cols, index=min(1, len(cols)-1))
+
+# 지표(분류) 컬럼은 있을 수도 없음(여러 지표가 한 파일 안에 있을 때 구분자)
+has_indicator = st.toggle("지표(분류) 컬럼이 있다", value=True)
+col_indicator = None
+if has_indicator:
+    col_indicator = st.selectbox("지표(분류) 컬럼", options=cols)
+
+# 값(숫자) 컬럼 자동 후보
+numeric_candidates = [c for c in cols if pd.api.types.is_numeric_dtype(df[c]) or c.lower() in ["value", "values", "obs_value"]]
+default_value_col = numeric_candidates[0] if numeric_candidates else cols[-1]
+col_value = st.selectbox("값(숫자) 컬럼", options=cols, index=cols.index(default_value_col) if default_value_col in cols else 0)
+
+# -------------------- 전처리 --------------------
+work = df.copy()
+work[col_country] = work[col_country].astype(str)
+# 값 컬럼 숫자화
+work[col_value] = pd.to_numeric(work[col_value], errors="coerce")
+work = work.dropna(subset=[col_value])
+
+# 시간(연도) 숫자 변환 시도(실패 시 문자열로 유지)
+time_numeric = pd.to_numeric(work[col_time], errors="coerce")
+has_numeric_year = time_numeric.notna().any()
+work["_time_num_"] = time_numeric
+work["_time_str_"] = work[col_time].astype(str)
+
+# -------------------- 지표 선택 --------------------
+st.divider()
+st.subheader("3) 필터 · 지표 선택")
+
+if has_indicator:
+    indicators = sorted(work[col_indicator].astype(str).unique())
+    selected_indicator = st.selectbox("지표 선택", indicators)
+    work = work[work[col_indicator].astype(str) == str(selected_indicator)]
+    st.caption(f"선택 지표: **{selected_indicator}**")
+else:
+    selected_indicator = "(단일 지표 파일)"
+    st.caption("지표 컬럼이 없는 단일 지표 파일로 처리합니다.")
+
+# -------------------- 기간 선택 --------------------
+col_a, col_b = st.columns([1,1])
+with col_a:
+    if has_numeric_year:
+        min_y = int(work["_time_num_"].min())
+        max_y = int(work["_time_num_"].max())
+        year_range = st.slider("연도 범위 선택", min_value=min_y, max_value=max_y, value=(max(min_y, max_y-5), max_y))
+        work = work[(work["_time_num_"] >= year_range[0]) & (work["_time_num_"] <= year_range[1])]
+    else:
+        years = sorted(work["_time_str_"].unique())
+        chosen = st.multiselect("시점 선택(문자열)", options=years, default=years[-1:] if years else [])
+        if chosen:
+            work = work[work["_time_str_"].isin(chosen)]
+
+with col_b:
+    top_k = st.slider("TOP K (막대차트)", min_value=5, max_value=20, value=10, step=1)
     show_table = st.toggle("표 보기", value=True)
-    show_labels = st.toggle("막대에 값 라벨 표시", value=True)
-    st.markdown("---")
-    st.markdown("**CSV 가이드**")
-    st.caption("필수 컬럼: `country`(국가명), `type`(유형명), `value`(값)")
 
-# ------------------------ 데이터 필터링 & 집계 ------------------------
-filtered = df[df["type"] == selected_type].copy()
+# -------------------- 레이아웃 --------------------
+st.divider()
+left, right = st.columns([1.2, 1])
 
-# 만약 동일 국가 중복 로우가 있으면 평균 집계
-agg = (filtered
-       .groupby("country", as_index=False)["value"]
-       .mean())
-
-top = agg.sort_values("value", ascending=False).head(top_k)
-top["rank"] = range(1, len(top) + 1)
-
-# ------------------------ 레이아웃 ------------------------
-left, right = st.columns([1.1, 1])
-
+# -------------------- 최근 시점 TOP K --------------------
 with left:
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown(f'<div class="badge">선택한 유형</div> <div class="section-title">🔎 {selected_type} — 국가별 TOP {len(top)}</div>', unsafe_allow_html=True)
+    st.markdown("### 🏆 최근 시점 기준 TOP K 국가")
 
-    # Altair 차트 (수평 막대)
-    chart = (
-        alt.Chart(top)
-        .mark_bar(cornerRadius=6)
-        .encode(
-            x=alt.X("value:Q", title="값 (value)", scale=alt.Scale(zero=True)),
-            y=alt.Y("country:N", sort="-x", title="국가"),
-            tooltip=[
-                alt.Tooltip("rank:O", title="순위"),
-                alt.Tooltip("country:N", title="국가"),
-                alt.Tooltip("value:Q", title="값", format=".2f")
-            ],
-            color=alt.Color("country:N", legend=None)
+    # 최근 시점 추출
+    if has_numeric_year and work["_time_num_"].notna().any():
+        last_year = int(work["_time_num_"].max())
+        recent_df = work[work["_time_num_"] == last_year].copy()
+        title_year = str(last_year)
+    else:
+        last_vals = work["_time_str_"].unique().tolist()
+        if last_vals:
+            last_vals.sort()
+            recent_key = last_vals[-1]
+            recent_df = work[work["_time_str_"] == recent_key].copy()
+            title_year = str(recent_key)
+        else:
+            recent_df = pd.DataFrame(columns=[col_country, col_value])
+            title_year = "latest"
+
+    if recent_df.empty:
+        st.info("선택한 범위 내 최근 시점 데이터가 없습니다. 연도/시점을 다시 선택해 주세요.")
+    else:
+        # 국가별 평균(중복행 있을 수 있으므로)
+        top = (recent_df.groupby(col_country, as_index=False)[col_value].mean()
+               .sort_values(col_value, ascending=False).head(top_k))
+        top["rank"] = range(1, len(top) + 1)
+
+        bar = (
+            alt.Chart(top)
+            .mark_bar(cornerRadius=6)
+            .encode(
+                x=alt.X(f"{col_value}:Q", title="값"),
+                y=alt.Y(f"{col_country}:N", sort="-x", title="국가"),
+                tooltip=[
+                    alt.Tooltip("rank:O", title="순위"),
+                    alt.Tooltip(f"{col_country}:N", title="국가"),
+                    alt.Tooltip(f"{col_value}:Q", title="값", format=",.2f"),
+                ],
+                color=alt.Color(f"{col_country}:N", legend=None),
+            )
+            .properties(
+                height=36 * len(top),
+                title=f"{selected_indicator} — {title_year} TOP {len(top)}"
+            )
         )
-        .properties(height=34 * len(top), width="container")
-    )
 
-    if show_labels:
-        text = (
+        label = (
             alt.Chart(top)
             .mark_text(align="left", dx=6)
             .encode(
-                x="value:Q",
-                y=alt.Y("country:N", sort="-x"),
-                text=alt.Text("value:Q", format=".2f")
+                x=f"{col_value}:Q",
+                y=alt.Y(f"{col_country}:N", sort="-x"),
+                text=alt.Text(f"{col_value}:Q", format=",.2f")
             )
         )
-        chart = chart + text
 
-    st.altair_chart(chart, use_container_width=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+        st.altair_chart(bar + label, use_container_width=True)
 
+        # 다운로드
+        csv_bytes = top[["rank", col_country, col_value]].to_csv(index=False).encode("utf-8-sig")
+        st.download_button("⬇️ TOP K 결과 CSV 저장", data=csv_bytes,
+                           file_name="oecd_topk.csv", mime="text/csv")
+
+# -------------------- 시계열 추세 --------------------
 with right:
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown('<div class="section-title">📊 요약</div>', unsafe_allow_html=True)
+    st.markdown("### ⏱ 시계열 추세 비교")
+    countries = sorted(work[col_country].astype(str).unique())
+    default_sel = countries[:min(3, len(countries))]
+    selected_countries = st.multiselect("국가 선택 (최대 6개 권장)", options=countries, default=default_sel)
 
-    if len(top) > 0:
-        best_row = top.iloc[0]
-        worst_row = top.iloc[-1]
-        kpi1, kpi2 = st.columns(2)
-        with kpi1:
-            st.metric(label="1위 국가", value=f"{best_row['country']}", delta=f"{best_row['value']:.2f}")
-        with kpi2:
-            st.metric(label=f"Top {len(top)} 평균", value=f"{top['value'].mean():.2f}")
-
-        st.markdown("#### 다운로드")
-        csv_bytes = top[["rank", "country", "value"]].to_csv(index=False).encode("utf-8-sig")
-        st.download_button(
-            "⬇️ 현재 결과 CSV 저장",
-            data=csv_bytes,
-            file_name=f"top_{len(top)}_{selected_type}.csv",
-            mime="text/csv"
-        )
+    ts = work[work[col_country].astype(str).isin(selected_countries)].copy()
+    if ts.empty:
+        st.info("선택한 국가의 시계열 데이터가 없습니다.")
     else:
-        st.info("선택한 유형에 대한 데이터가 없습니다.")
+        # Altair 호환성 위해 x축은 문자열로 처리
+        x_field = "_time_str_"
+        line = (
+            alt.Chart(ts)
+            .mark_line(point=True, interpolate="monotone")
+            .encode(
+                x=alt.X(f"{x_field}:O", title="시점"),
+                y=alt.Y(f"{col_value}:Q", title="값"),
+                color=alt.Color(f"{col_country}:N", title="국가"),
+                tooltip=[col_country, x_field, alt.Tooltip(col_value, title="값", format=",.2f")],
+            )
+            .properties(height=380, title=f"{selected_indicator} — 시계열 추세")
+        )
+        st.altair_chart(line, use_container_width=True)
 
-    st.markdown('</div>', unsafe_allow_html=True)
-
+# -------------------- 도움말 --------------------
 st.divider()
+with st.expander("🧭 OECD CSV 빠르게 구하는 법"):
+    st.markdown("""
+1) **stats.oecd.org** 접속 → 원하는 데이터셋 열기  
+2) 우측 상단 **Export → CSV file** 클릭  
+3) 이 앱에서 **URL 붙여넣기** 또는 **CSV 업로드**  
+4) **국가/연도/값(지표) 컬럼 매핑** 지정  
+5) TOP K 및 시계열 그래프로 즉시 분석
+""")
 
-# ------------------------ 원본/가이드 ------------------------
-with st.expander("📁 데이터 형식 가이드 & 원본 미리보기"):
-    st.write("데이터 예시 (상위 10행):")
-    st.dataframe(df.head(10))
-    st.caption("• `country`: 문자열(국가명)  • `type`: 문자열(유형)  • `value`: 숫자형 값")
-
-# 푸터
-st.markdown(
-    '<p class="small-muted">© 2025 VibeCoding · Streamlit Cloud Ready · Altair Charts</p>',
-    unsafe_allow_html=True
-)
+st.caption("© 2025 VibeCoding · Streamlit + Altair · OECD CSV 바로 사용")
